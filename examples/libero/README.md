@@ -49,9 +49,11 @@ export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
 
 # Run the simulation
 python examples/libero/main.py
+python examples/libero/run_parallel.py # toy parallel policy rollout with serialized inference
 
 # To run with glx for Mujoco instead (use this if you have egl errors):
 MUJOCO_GL=glx python examples/libero/main.py
+MUJOCO_GL=glx python examples/libero/run_parallel.py
 ```
 
 Terminal window 2:
