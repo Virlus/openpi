@@ -49,18 +49,19 @@ export PYTHONPATH=$PYTHONPATH:$PWD/third_party/libero
 
 # Run the simulation
 python examples/libero/main.py
-python examples/libero/run_parallel.py # toy parallel policy rollout with serialized inference
+python examples/libero/run_parallel.py --num-envs 20 # parallel policy rollout! 
 
 # To run with glx for Mujoco instead (use this if you have egl errors):
 MUJOCO_GL=glx python examples/libero/main.py
-MUJOCO_GL=glx python examples/libero/run_parallel.py
+MUJOCO_GL=glx python examples/libero/run_parallel.py --num-envs 20
 ```
 
 Terminal window 2:
 
 ```bash
 # Run the server
-uv run scripts/serve_policy.py --env LIBERO
+uv run scripts/serve_policy.py --env LIBERO # single env
+uv run scripts/serve_policy.py --env LIBERO --is-batched # parallel env
 ```
 
 ## Results
