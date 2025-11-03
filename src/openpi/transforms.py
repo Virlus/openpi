@@ -263,10 +263,10 @@ class TokenizePrompt(DataTransformFn):
         else:
             state = None
 
+        bsz = 1
         if not isinstance(prompt, str):
             try:
                 prompt = prompt.item()
-                bsz = 1
             except:
                 bsz = prompt.shape[0]
                 prompt = prompt[0]
