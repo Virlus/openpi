@@ -1,15 +1,24 @@
 import time
 import os
 import numpy as np
-import argparse
+from dataclasses import dataclass
+from typing import List
 from scipy.spatial.transform import Rotation as R
 import h5py
+import tyro
 
 from hardware.robot_env import RobotEnv
 from hardware.my_device.macros import CAM_SERIAL
 
 
-def main(args):
+@dataclass
+class Args:
+    save_path: str
+    resolution: List[int]
+    fps: float = 10.0
+
+
+def main(args: Args):
     robot_env = RobotEnv(camera_serial=CAM_SERIAL, img_shape=[3]+args.resolution, fps=args.fps)
     
     # Determine starting episode_id based on existing file
@@ -94,10 +103,5 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-save', '--save_path', type=str, required=True)
-    parser.add_argument('-res', '--resolution', nargs='+', type=int)
-    parser.add_argument('--fps', type=float, default=10.0)
-    args = parser.parse_args()
-    main(args)
+    main(tyro.cli(Args))
     
