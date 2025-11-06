@@ -6,10 +6,21 @@ from typing import Union, Tuple
 import pathlib
 import time
 import collections
+import h5py
+import os
 
 from hardware.robot_env import RobotEnv
 from hardware.my_device.macros import CAM_SERIAL, HUMAN, ROBOT
 from openpi_client import websocket_client_policy as _websocket_client_policy
+
+KEY_MAPPING = {
+    'wrist_cam': 'wrist_img',
+    'side_cam': 'side_img',
+    'tcp_pose': 'tcp_pose',
+    'joint_pos': 'joint_pos',
+    'action': 'action',
+    'action_mode': 'action_mode'
+}
 
 def init_robot_env(img_shape: tuple[int, int, int], fps: float) -> RobotEnv:
     return RobotEnv(
@@ -40,7 +51,7 @@ class Args:
     # Utils
     #################################################################################################################
     output_dir: str = "data/flexiv/rollout_data"  # Path to save rollout data
-
+    output_name: str = "test"
     seed: int = 7  # Random Seed (for reproducibility)
 
 
@@ -59,12 +70,42 @@ def main(args: Args) -> None:
         robot_env_img_shape = (3, *args.resize_size)
     robot_env = init_robot_env(img_shape=robot_env_img_shape, fps=args.fps)
 
+    # Setup output file
     pathlib.Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    output_path = os.path.join(args.output_dir, f"{args.output_name}.hdf5")
+    episode_id = 0
+    if os.path.exists(output_path):
+        with h5py.File(output_path, 'r') as f:
+            # Find the highest episode_id in the existing file
+            episode_keys = [key for key in f.keys() if key.startswith('episode_')]
+            if episode_keys:
+                episode_ids = [int(key.split('_')[1]) for key in episode_keys]
+                episode_id = max(episode_ids) + 1
+                print(f"Appending to existing file. Starting from episode {episode_id}")
 
     # Run rollout
     client = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
 
     for i in range(args.num_rollouts):
+        if robot_env.keyboard.quit:
+            break
+
+        # Reset keyboard states
+        robot_env.keyboard.finish = False
+        robot_env.keyboard.help = False
+        robot_env.keyboard.infer = False
+        robot_env.keyboard.discard = False
+
+        # Initialize episode buffers
+        episode_buffers = {
+            'tcp_pose': [],
+            'joint_pos': [],
+            'action': [],
+            'action_mode': [],
+            'wrist_cam': [],
+            'side_cam': []
+        }
+
         logging.info(f"Running rollout {i+1}/{args.num_rollouts}")
         logging.info(f"Task description: {task_description}")
 
@@ -75,33 +116,76 @@ def main(args: Args) -> None:
         
         robot_state = robot_env.reset_robot(args.random_init, random_init_pose)
         action_plan = collections.deque()
-
         t = 0
+
         while t < args.max_steps:
-            start_time = time.time()
+            if robot_env.keyboard.finish:
+                # Finalize episode
+                for key in episode_buffers.keys():
+                    episode_buffers[key] = np.stack(episode_buffers[key], axis=0)
+                # Save to file
+                with h5py.File(output_path, 'a') as f:
+                    episode_group = f.create_group(f'episode_{episode_id}')
+                    for key, value in episode_buffers.items():
+                        episode_group.create_dataset(key, data=value)
+                    episode_id += 1
+                logging.info(f"Rollout {i+1}/{args.num_rollouts} finished")
+                logging.info(f"Episode {episode_id} saved")
+                break
 
-            # Get observations
-            robot_state = robot_env.get_robot_state()
-            if not action_plan:
-                element = {
-                    "observation/image": robot_state['side_img'].permute(1, 2, 0).cpu().numpy().astype(np.uint8),
-                    "observation/wrist_image": robot_state['wrist_img'].permute(1, 2, 0).cpu().numpy().astype(np.uint8),
-                    "observation/state": robot_state['tcp_pose'],
-                    "prompt": task_description,
-                }
-                action_chunk = client.infer(element)["actions"]
-                assert(
-                    len(action_chunk) >= args.replan_steps
-                ), f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
-                action_plan.extend(action_chunk[:args.replan_steps])
-            
-            action = action_plan.popleft()
-            robot_env.deploy_action(action[:6], action[6])
-            # Sleep to maintain the desired fps
-            time.sleep(max(1 / args.fps - (time.time() - start_time), 0))
-            t += 1
+            if robot_env.keyboard.discard:
+                logging.info(f"Rollout {i+1}/{args.num_rollouts} discarded")
+                break
 
-        logging.info(f"Rollout {i+1}/{args.num_rollouts} completed")
+            if not robot_env.keyboard.help:
+                start_time = time.time()
+
+                # Get observations
+                robot_state = robot_env.get_robot_state()
+                if not action_plan:
+                    element = {
+                        "observation/image": robot_state['side_img'],
+                        "observation/wrist_image": robot_state['wrist_img'],
+                        "observation/state": robot_state['tcp_pose'],
+                        "prompt": task_description,
+                    }
+                    action_chunk = client.infer(element)["actions"]
+                    assert(
+                        len(action_chunk) >= args.replan_steps
+                    ), f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
+                    action_plan.extend(action_chunk[:args.replan_steps])
+                # Execute action
+                action = action_plan.popleft()
+                robot_env.deploy_action(action[:6], action[6])
+                # Save to buffer
+                episode_buffers['wrist_cam'].append(robot_state['wrist_img'])
+                episode_buffers['side_cam'].append(robot_state['side_img'])
+                episode_buffers['tcp_pose'].append(robot_state['tcp_pose'])
+                episode_buffers['joint_pos'].append(robot_state['joint_pos'])
+                episode_buffers['action'].append(action)
+                episode_buffers['action_mode'].append(ROBOT)
+
+                # Sleep to maintain the desired fps
+                time.sleep(max(1 / args.fps - (time.time() - start_time), 0))
+                t += 1
+            else:
+                if len(action_plan):
+                    action_plan.clear()
+                teleop_data = robot_env.human_teleop_step()
+                if teleop_data is None:
+                    continue
+
+                # Save to buffer
+                for buffer_key, teleop_data_key in KEY_MAPPING.items():
+                    episode_buffers[buffer_key].append(teleop_data[teleop_data_key])
+                # Reset keyboard states
+                if robot_env.keyboard.infer:
+                    robot_env.keyboard.help = False
+                    robot_env.keyboard.infer = False
+                
+                t += 1
+
+        logging.info(f"Rollout {i+1}/{args.num_rollouts} timeout")
 
 
 if __name__ == "__main__":

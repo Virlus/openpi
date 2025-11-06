@@ -86,8 +86,10 @@ class RobotEnv:
             cam_data.append(color_image)
             
         # Process images
-        side_img = self.image_processor(torch.from_numpy(cv2.cvtColor(cam_data[0].copy(), cv2.COLOR_BGR2RGB)).permute(2, 0, 1))
-        wrist_img = self.image_processor(torch.from_numpy(cv2.cvtColor(cam_data[1].copy(), cv2.COLOR_BGR2RGB)).permute(2, 0, 1))
+        side_img = self.image_processor(torch.from_numpy(cv2.cvtColor(cam_data[0].copy(), cv2.COLOR_BGR2RGB)).permute(2, 0, 1)).\
+            permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+        wrist_img = self.image_processor(torch.from_numpy(cv2.cvtColor(cam_data[1].copy(), cv2.COLOR_BGR2RGB)).permute(2, 0, 1)).\
+            permute(1, 2, 0).cpu().numpy().astype(np.uint8)
         
         return {
             'tcp_pose': tcp_pose,
@@ -130,8 +132,8 @@ class RobotEnv:
                     side_img = state_data['side_img_raw']
                     wrist_img = state_data['wrist_img_raw']
                 else:
-                    side_img = cv2.cvtColor(state_data['side_img'].permute(1, 2, 0).cpu().numpy().astype(np.uint8), cv2.COLOR_RGB2BGR)
-                    wrist_img = cv2.cvtColor(state_data['wrist_img'].permute(1, 2, 0).cpu().numpy().astype(np.uint8), cv2.COLOR_RGB2BGR)
+                    side_img = cv2.cvtColor(state_data['side_img'], cv2.COLOR_RGB2BGR)
+                    wrist_img = cv2.cvtColor(state_data['wrist_img'], cv2.COLOR_RGB2BGR)
                 cv2.imshow("Side", (np.array(side_img) * 0.5 + np.array(ref_side_img) * 0.5).astype(np.uint8))
                 cv2.imshow("Wrist", (np.array(wrist_img) * 0.5 + np.array(ref_wrist_img) * 0.5).astype(np.uint8))
                 cv2.waitKey(1)
@@ -145,8 +147,8 @@ class RobotEnv:
                 side_img = state_data['side_img_raw']
                 wrist_img = state_data['wrist_img_raw']
             else:
-                side_img = cv2.cvtColor(state_data['side_img'].permute(1, 2, 0).cpu().numpy().astype(np.uint8), cv2.COLOR_RGB2BGR)
-                wrist_img = cv2.cvtColor(state_data['wrist_img'].permute(1, 2, 0).cpu().numpy().astype(np.uint8), cv2.COLOR_RGB2BGR)
+                side_img = cv2.cvtColor(state_data['side_img'], cv2.COLOR_RGB2BGR)
+                wrist_img = cv2.cvtColor(state_data['wrist_img'], cv2.COLOR_RGB2BGR)
             cv2.imshow("Side", (np.array(side_img) * 0.5 + np.array(ref_side_img) * 0.5).astype(np.uint8))
             cv2.imshow("Wrist", (np.array(wrist_img) * 0.5 + np.array(ref_wrist_img) * 0.5).astype(np.uint8))
             cv2.waitKey(1)
