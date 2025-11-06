@@ -99,7 +99,11 @@ class RobotEnv:
         }
     
     def deploy_action(self, tcp_action, gripper_action):
-        self.robot.send_tcp_pose(tcp_action)
+        action = np.concatenate((
+            tcp_action[:3],
+            R.from_euler('XYZ', tcp_action[3:6], degrees=False).as_quat(scalar_first=True)
+        ))
+        self.robot.send_tcp_pose(action)
         self.gripper.move(gripper_action)
     
     def save_scene_images(self, output_dir, episode_idx):
