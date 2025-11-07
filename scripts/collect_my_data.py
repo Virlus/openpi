@@ -74,7 +74,7 @@ def main(args: Args):
                 print('WARNING: discard the demo!')
                 robot_env.gripper.move(robot_env.gripper.max_width)
                 time.sleep(0.5)
-                return
+                continue
             
             episode = dict()
             episode['wrist_cam'] = np.stack(wrist_cam, axis=0)
