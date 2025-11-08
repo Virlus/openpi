@@ -113,8 +113,10 @@ def main(args: Args) -> None:
         random_init_pose = None
         if args.random_init:
             random_init_pose = robot_env.robot.init_pose + np.random.uniform(-0.1, 0.1, size=7)
+            random_init_pose[2] = max(random_init_pose[2], 0.15)
         
         robot_state = robot_env.reset_robot(args.random_init, random_init_pose)
+        time.sleep(5) # Wait for scene reset
         action_plan = collections.deque()
         t = 0
 
