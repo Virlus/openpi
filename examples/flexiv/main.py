@@ -10,7 +10,7 @@ import h5py
 import os
 
 from hardware.robot_env import RobotEnv
-from hardware.my_device.macros import CAM_SERIAL, HUMAN, ROBOT
+from hardware.my_device.macros import CAM_SERIAL, HUMAN, ROBOT, CANONICAL_EULER_ANGLES
 from openpi_client import websocket_client_policy as _websocket_client_policy
 
 KEY_MAPPING = {
@@ -118,6 +118,7 @@ def main(args: Args) -> None:
         robot_state = robot_env.reset_robot(args.random_init, random_init_pose)
         time.sleep(5) # Wait for scene reset
         action_plan = collections.deque()
+        tcp_rot_history = [CANONICAL_EULER_ANGLES] # to prevent gimbal lock problem of euler angles in the observation space
         t = 0
 
         while t < args.max_steps:
@@ -144,11 +145,13 @@ def main(args: Args) -> None:
 
                 # Get observations
                 robot_state = robot_env.get_robot_state()
+                standard_tcp_rot = np.unwrap(np.stack((tcp_rot_history[-1], robot_state['tcp_pose'][3:6]), axis=0), axis=0)[1, :]
+                tcp_rot_history.append(standard_tcp_rot) # Prevent gimbal lock
                 if not action_plan:
                     element = {
                         "observation/image": robot_state['side_img'],
                         "observation/wrist_image": robot_state['wrist_img'],
-                        "observation/state": robot_state['tcp_pose'],
+                        "observation/state": np.concatenate((robot_state['tcp_pose'][:3], standard_tcp_rot), axis=0),
                         "prompt": task_description,
                     }
                     action_chunk = client.infer(element)["actions"]
@@ -176,7 +179,10 @@ def main(args: Args) -> None:
                 teleop_data = robot_env.human_teleop_step()
                 if teleop_data is None:
                     continue
-
+                
+                standard_tcp_rot = np.unwrap(np.stack((tcp_rot_history[-1], teleop_data['tcp_pose'][3:6]), axis=0), axis=0)[1, :]
+                tcp_rot_history.append(standard_tcp_rot) # Prevent gimbal lock
+                teleop_data['tcp_pose'] = np.concatenate((teleop_data['tcp_pose'][:3], standard_tcp_rot), axis=0)
                 # Save to buffer
                 for buffer_key, teleop_data_key in KEY_MAPPING.items():
                     episode_buffers[buffer_key].append(teleop_data[teleop_data_key])

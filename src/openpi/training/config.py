@@ -412,9 +412,9 @@ class LeRobotMyDataConfig(DataConfigFactory):
         # LIBERO already represents actions as deltas, but we have some old Pi0 checkpoints that are trained with this
         # extra delta transform.
         if self.extra_delta_transform:
-            delta_action_mask = _transforms.make_bool_mask(9, -1)
+            delta_action_mask = _transforms.make_bool_mask(6, -1)
             data_transforms = data_transforms.push(
-                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                inputs=[_transforms.UnwrappedDeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
             )
 
@@ -748,12 +748,12 @@ _CONFIGS = [
         # Here you define the model config -- In this example we use pi0 as the model
         # architecture and perform *full* finetuning. in the examples below we show how to modify
         # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
-        model=pi0_config.Pi0Config(),
+        model=pi0_config.Pi0Config(action_horizon=10),
         # Here you define the dataset you are training on. In this example we use the Libero
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotMyDataConfig(
-            repo_id="Virlus/fold_towel_twice",
+            repo_id="Virlus/flexiv_fold_towel_twice_euler_angles",
             base_config=DataConfig(
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the
                 # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
@@ -776,7 +776,7 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_base/params"),
         # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
         # Check the base TrainConfig class for a full list of available hyperparameters.
-        num_train_steps=15_000,
+        num_train_steps=25_000,
     ),
     TrainConfig(
         name="pi0_libero_low_mem_finetune",
@@ -869,7 +869,7 @@ _CONFIGS = [
         name="pi05_flexiv",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
         data=LeRobotMyDataConfig(
-            repo_id="Virlus/flexiv_fold_towel_twice_no_proprio",
+            repo_id="Virlus/flexiv_fold_towel_twice_euler_angles",
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
@@ -884,7 +884,7 @@ _CONFIGS = [
         ema_decay=0.999,
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
-        num_train_steps=15_000,
+        num_train_steps=25_000,
     ),
     #
     # Fine-tuning Aloha configs.

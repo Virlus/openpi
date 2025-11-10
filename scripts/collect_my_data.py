@@ -8,7 +8,7 @@ import h5py
 import tyro
 
 from hardware.robot_env import RobotEnv
-from hardware.my_device.macros import CAM_SERIAL
+from hardware.my_device.macros import CAM_SERIAL, CANONICAL_EULER_ANGLES
 
 
 @dataclass
@@ -83,6 +83,13 @@ def main(args: Args):
             episode['tcp_pose'] = np.stack(tcp_pose, axis=0)
             episode['joint_pos'] = np.stack(joint_pos, axis=0)
             episode['action'] = np.stack(action, axis=0)
+            
+            # ================ Prevent Gimbal Lock problem of Euler angles =================
+            concat_tcp_r = np.concatenate((CANONICAL_EULER_ANGLES, episode['tcp_pose'][:, 3:6]), axis=0)
+            unwrapped_tcp_r = np.unwrap(concat_tcp_r, axis=0)
+            episode['tcp_pose'] = np.concatenate((episode['tcp_pose'][:, :3], unwrapped_tcp_r[1:, :]), axis=-1)
+            # ================ Prevent Gimbal Lock problem of Euler angles =================
+
             # Create a group for this episode
             episode_group = f.create_group(f'episode_{episode_id}')
             # Save all key-value pairs for this episode

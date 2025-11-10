@@ -6,6 +6,7 @@ from typing import Protocol, TypeAlias, TypeVar, runtime_checkable
 import flax.traverse_util as traverse_util
 import jax
 import numpy as np
+import torch
 from openpi_client import image_tools
 
 from openpi.models import tokenizer as _tokenizer
@@ -245,6 +246,34 @@ class AbsoluteActions(DataTransformFn):
         actions[..., :dims] += np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
         data["actions"] = actions
 
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
+class UnwrappedDeltaActions(DataTransformFn):
+    """Unwrapped delta actions designed for euler angles."""
+
+    mask: Sequence[bool] | None
+
+    def __call__(self, data:DataDict) -> DataDict:
+        if "actions" not in data or self.mask is None:
+            return data
+        
+        state, actions = data["state"], data["actions"]
+        if state.shape[-1] < actions.shape[-1]:
+            state = torch.from_numpy(pad_to_dim(state, actions.shape[-1], axis=-1)).type_as(actions)
+        mask = np.asarray(self.mask)
+        dims = mask.shape[-1]
+        #================= Unwrapping process for an action chunk =================
+        state_euler_angles = state[..., 3:6]
+        action_euler_angles = actions[..., 3:6]
+        concat_chunk = np.concatenate((np.expand_dims(state_euler_angles, axis=-2), action_euler_angles), axis=-2)
+        unwrapped_chunk = torch.from_numpy(np.unwrap(concat_chunk, axis=-2)).type_as(state)
+        state[..., 3:6] = unwrapped_chunk[..., 0, :]
+        actions[..., 3:6] = unwrapped_chunk[..., 1:, :]
+        #================= Unwrapping process for an action chunk =================
+        actions[..., :dims] -= np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
+        data["actions"] = actions
         return data
 
 
