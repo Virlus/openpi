@@ -45,13 +45,13 @@ class Args:
     fps: float = 10.0
     random_init: bool = True
     max_steps: int = 600
-    num_rollouts: int = 10
+    num_rollouts: int = 20
 
     #################################################################################################################
     # Utils
     #################################################################################################################
     output_dir: str = "data/flexiv/rollout_data"  # Path to save rollout data
-    output_name: str = "test"
+    output_name: str = "1111_fold_towel_twice_rel_euler"
     seed: int = 7  # Random Seed (for reproducibility)
 
 
@@ -116,7 +116,7 @@ def main(args: Args) -> None:
             random_init_pose[2] = max(random_init_pose[2], 0.15)
         
         robot_state = robot_env.reset_robot(args.random_init, random_init_pose)
-        time.sleep(5) # Wait for scene reset
+        time.sleep(5)
         action_plan = collections.deque()
         tcp_rot_history = [CANONICAL_EULER_ANGLES] # to prevent gimbal lock problem of euler angles in the observation space
         t = 0
@@ -161,7 +161,7 @@ def main(args: Args) -> None:
                     action_plan.extend(action_chunk[:args.replan_steps])
                 # Execute action
                 action = action_plan.popleft()
-                robot_env.deploy_action(action[:9], action[9])
+                robot_env.deploy_action(action[:6], action[6])
                 # Save to buffer
                 episode_buffers['wrist_cam'].append(robot_state['wrist_img'])
                 episode_buffers['side_cam'].append(robot_state['side_img'])

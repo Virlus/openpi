@@ -54,7 +54,7 @@ class RobotEnv:
             self.robot.send_tcp_pose(random_init_pose)
         else:
             self.robot.send_tcp_pose(self.robot.init_pose)
-        time.sleep(2)
+        time.sleep(5)
         self.gripper.move(self.gripper.max_width)
         time.sleep(0.5)
         print("Reset!")
