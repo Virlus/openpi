@@ -27,8 +27,7 @@ class FlexivRobot:
         self.robot_states = flexivrdk.RobotStates()
         # self.log = flexivrdk.Log()
         self.mode = flexivrdk.Mode
-        self.robot = flexivrdk.Robot("Rizon4-062713")
-        # self.robot = flexivrdk.Robot("Rizon4-062498")
+        self.robot = flexivrdk.Robot("Rizon4-00020")
         self.default_pose = default_pose
         self.home_pose = [0.6,0,0.2,0,0,1,0]
         self.home_joint_pos = [0.21771033108234406, -0.3984721302986145, -0.03492163121700287, 1.8705854415893555, 0.0208751130849123, 0.6941397190093994, 0.1695701628923416]
@@ -230,7 +229,7 @@ class FlexivRobot:
             RuntimeError: error occurred when mode is None.
         """
         self.switch_mode('cart_impedance_online')
-        self.robot.SendCartesianMotionForce(np.array(tcp), [0] * 6, 0.1) # 0.1: maximum velocity
+        self.robot.SendCartesianMotionForce(np.array(tcp), [0] * 6, max_linear_vel=0.1) # 0.1: maximum velocity
 
     def send_tcp_pose(self, tcp):
         """
