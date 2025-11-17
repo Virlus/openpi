@@ -87,7 +87,8 @@ def main(args: Args) -> None:
     train_dataset = MultiStageDataset(
         dataset_path=train_config.dataset_path,
         num_stages=train_config.num_stages,
-        max_seq_len=train_config.max_seq_len
+        max_seq_len=train_config.max_seq_len,
+        video_rewind=train_config.video_rewind
     )
     stage_prior = torch.from_numpy(train_dataset.stage_prior).to(device)
     cumulative_stage_prior = torch.from_numpy(train_dataset.cumulative_stage_prior).to(device)
