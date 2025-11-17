@@ -84,11 +84,16 @@ def save_episode_reward_video(
             tqdm(frame_indices, desc=f"Rendering video for {episode_name}")
         ):
             base_frame = _ensure_uint8_bgr(frames_np[frame_idx])
+            # Increase plot width to accommodate captions on the rightmost curve
+            # Ensure width is even for H.264 encoding compatibility
+            plot_width = int(base_frame.shape[1] * 1.3)  # 30% wider
+            if plot_width % 2 == 1:  # Make sure width is even
+                plot_width += 1
             plot_frame = _render_reward_plot_frame(
                 rewards=rewards_np,
                 current_step=viz_idx,
                 height=base_frame.shape[0],
-                width=base_frame.shape[1],
+                width=plot_width,
                 reward_bounds=reward_bounds,
             )
             combined_frame = np.concatenate((base_frame, plot_frame), axis=1)
@@ -134,7 +139,7 @@ def _render_reward_plot_frame(
     reward_bounds: Tuple[float, float]
 ) -> np.ndarray:
     plot_img = np.full((height, width, 3), 255, dtype=np.uint8)
-    margin_left, margin_right = 60, 20
+    margin_left, margin_right = 60, 80  # Increased right margin for captions
     margin_top, margin_bottom = 20, 40
     axis_width = max(width - margin_left - margin_right, 1)
     axis_height = max(height - margin_top - margin_bottom, 1)
