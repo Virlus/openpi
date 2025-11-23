@@ -17,6 +17,7 @@ class Args:
     data_path: str
     stage_annotation_path: str
     num_stages: int
+    visual_embedding_key: str = "dino_embeddings"
 
 
 def _load_stage_annotations(path: str) -> Dict[str, Any]:
@@ -79,7 +80,12 @@ def main(args: Args) -> None:
                 continue
 
             episode = dataset[key]
-            num_steps = int(episode["dino_embeddings"].shape[0])
+            if args.visual_embedding_key not in episode:
+                LOGGER.error(
+                    "Embedding key '%s' not found in episode %s.", args.visual_embedding_key, key
+                )
+                continue
+            num_steps = int(episode[args.visual_embedding_key].shape[0])
             raw_boundaries = stage_annotations[key]
             assert (len(raw_boundaries) == args.num_stages - 1), "The number of stage boundaries must be the number of stages - 1"
 

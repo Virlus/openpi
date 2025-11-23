@@ -1,75 +1,68 @@
+from __future__ import annotations
+
 import dataclasses
 import logging
-import subprocess
-import tempfile
 from pathlib import Path
-from typing import Tuple
+from typing import Optional
 
-import cv2
 import h5py
 import numpy as np
 import torch
 import tyro
-from transformers import AutoTokenizer, AutoModel
-from tqdm import tqdm
 from easydict import EasyDict
+from tqdm import tqdm
 
+from reward_model.config import get_reward_backbone_config
+from reward_model.embedding_extractors import ExtractorInitParams, build_embedding_extractor
 from reward_model.multi_stage_dataset import MultiStageDataset
 from reward_model.reward_transformer import RewardTransformer
-from reward_model.util import dino_load_image, mean_pooling, save_episode_reward_video
-from third_party.dinov2.model import vit_base
+from reward_model.util import save_episode_reward_video
 
-
-PROMPT = "Put the items in the pot."
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
 class Args:
-    # dataset parameters
     dataset_path: str
     output_path: str
     reward_model_path: str
-    vision_encoder_path: str
-    # training parameters
+    dino_ckpt_path: Optional[str] = None
     batch_size: int = 32
     device: str = "cuda"
-    # visualization parameters
     video_fps: int = 10
 
 
-def load_model(args: Args, device: torch.device) -> Tuple[torch.nn.Module, AutoTokenizer, AutoModel]:
-    # load pretrained DINOv2 encoder
-    dino_encoder = vit_base(
-        img_size=518,
-        patch_size=14,
-        init_values=1.0,
-        ffn_layer="mlp",
-        block_chunks=0,
-        num_register_tokens=4,
-        interpolate_antialias=True,
-        interpolate_offset=0.0,
-    ).to(device)
-    dino_encoder.load_state_dict(torch.load(args.vision_encoder_path), strict=True)
+def _resolve_device(device_str: str) -> torch.device:
+    device = torch.device(device_str)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        LOGGER.warning("CUDA requested but not available. Falling back to CPU.")
+        return torch.device("cpu")
+    return device
 
-    # load pretrained all-MiniLM-L12-v2 encoder following ReWIND
-    minilm_tokenizer = AutoTokenizer.from_pretrained(
-        "sentence-transformers/all-MiniLM-L12-v2"
-    )
-    minilm_model = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L12-v2").to(
-        device
-    )
 
-    return dino_encoder, minilm_tokenizer, minilm_model
+def _build_sliding_windows(
+    dataset: MultiStageDataset,
+    embeddings: np.ndarray,
+    max_seq_len: int,
+) -> np.ndarray:
+    padded_sequences = [
+        dataset.padding_sequence(embeddings[:-i]) for i in range(max_seq_len - 1, 0, -1)
+    ]
+    padded_sequences.append(dataset.padding_sequence(embeddings))
+    return np.stack(padded_sequences, axis=0)
 
 
 def main(args: Args) -> None:
-    # Load trained model and dataset
-    saved_dict = torch.load(args.reward_model_path)
-    train_config = saved_dict['args']
-    train_config = EasyDict(**train_config)
-    device = torch.device(args.device)
+    logging.basicConfig(level=logging.INFO)
+    device = _resolve_device(args.device)
     output_dir = Path(args.output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_dict = torch.load(args.reward_model_path, map_location="cpu")
+    train_config = EasyDict(**saved_dict["args"])
+    backbone_name = getattr(train_config, "backbone", "dinov2_minilm")
+    backbone_config = get_reward_backbone_config(backbone_name)
+
     reward_model = RewardTransformer(
         args=train_config,
         video_dim=train_config.video_dim,
@@ -77,92 +70,90 @@ def main(args: Args) -> None:
         hidden_dim=train_config.hidden_dim,
         num_heads=train_config.num_heads,
         num_layers=train_config.num_layers,
-        num_stages=train_config.num_stages
+        num_stages=train_config.num_stages,
     )
-    reward_model.load_state_dict(saved_dict['model_state_dict'])
+    reward_model.load_state_dict(saved_dict["model_state_dict"])
     reward_model.to(device)
     reward_model.eval()
 
-    # Load stage prior from the pretrained dataset
+    visual_key = getattr(train_config, "visual_embedding_key", backbone_config.visual_embedding.key)
+    default_language_key = (
+        backbone_config.language_embedding.key if backbone_config.language_embedding else None
+    )
+    language_key = getattr(train_config, "language_embedding_key", default_language_key)
     train_dataset = MultiStageDataset(
         dataset_path=train_config.dataset_path,
         num_stages=train_config.num_stages,
         max_seq_len=train_config.max_seq_len,
-        video_rewind=train_config.video_rewind
+        video_rewind=train_config.video_rewind,
+        visual_embedding_key=visual_key,
+        language_embedding_key=language_key,
     )
     stage_prior = torch.from_numpy(train_dataset.stage_prior).to(device)
     cumulative_stage_prior = torch.from_numpy(train_dataset.cumulative_stage_prior).to(device)
 
-    # Load pretrained vision and language encoder
-    dino_encoder, minilm_tokenizer, minilm_model = load_model(args, device)
-    with torch.no_grad():
-        encoded_input = minilm_tokenizer(
-                [PROMPT], padding=False, truncation=True, return_tensors="pt"
-            ).to(device)
-        model_output = minilm_model(**encoded_input)
-        minlm_task_embedding = (
-            mean_pooling(model_output, encoded_input["attention_mask"])
-            .cpu()
-            .detach()
-            .numpy()
-        )
+    extractor = build_embedding_extractor(
+        backbone_config,
+        ExtractorInitParams(device=device, dino_ckpt_path=args.dino_ckpt_path),
+    )
+    prompt = getattr(train_config, "prompt")
+    language_embedding = extractor.get_language_embedding(prompt)
 
-    # Read the dataset to be processed
-    with h5py.File(args.dataset_path, 'r') as f:
-        for key in tqdm(f, desc="Processing episodes"):
-            episode = f[key]
-            side_cam_frames = episode['side_cam'][:]
-            num_episode_steps = side_cam_frames.shape[0]
-            # ================ Extract DINO embeddings ================
-            dino_embeddings = []
-            for step in tqdm(range(0, num_episode_steps, args.batch_size), desc="Extracting DINO embeddings"):
-                batch_images = side_cam_frames[step:min(step+args.batch_size, num_episode_steps)]
-                batch_images = [dino_load_image(img) for img in batch_images]
-                batch_images = torch.cat(batch_images, dim=0)
-                batch_images = batch_images.to(device)
-                with torch.no_grad():
-                    batch_embeddings = dino_encoder(batch_images)
-                    batch_embeddings = batch_embeddings.cpu().detach().numpy()
-                    dino_embeddings.append(batch_embeddings)
-            
-            dino_embeddings = np.concatenate(dino_embeddings, axis=0)
-            # ================ Extract DINO embeddings ================
+    with h5py.File(args.dataset_path, "r") as dataset:
+        for key in tqdm(dataset.keys(), desc="Processing episodes"):
+            episode = dataset[key]
+            frames = episode["side_cam"]
+            visual_embeddings = extractor.extract_visual_embeddings(
+                frames=frames,
+                batch_size=args.batch_size,
+                prompt=prompt,
+            )
 
-            # ================= Evaluate pretrained reward model ================
-            padded_dino_embeddings = [train_dataset.padding_sequence(dino_embeddings[:-i]) \
-                for i in range(train_config.max_seq_len - 1, 0, -1)] + [train_dataset.padding_sequence(dino_embeddings)]
-            padded_dino_embeddings = np.stack(padded_dino_embeddings, axis=0)
-            padded_dino_embeddings = torch.from_numpy(padded_dino_embeddings).to(device)
+            padded_visual_embeddings = _build_sliding_windows(
+                train_dataset,
+                visual_embeddings,
+                train_config.max_seq_len,
+            )
+            padded_visual_embeddings = torch.from_numpy(padded_visual_embeddings).to(device)
 
-            curr_minlm_task_embedding = np.repeat(np.expand_dims(minlm_task_embedding, axis=0), padded_dino_embeddings.shape[0], axis=0)
-            curr_minlm_task_embedding = torch.from_numpy(curr_minlm_task_embedding).to(device)
+            language_tensor = None
+            if language_embedding is not None and train_config.text_dim:
+                repeated = np.repeat(
+                    np.expand_dims(language_embedding, axis=0),
+                    padded_visual_embeddings.shape[0],
+                    axis=0,
+                )
+                language_tensor = torch.from_numpy(repeated).to(device)
 
-            pred_mask = np.zeros((padded_dino_embeddings.shape[0], train_config.max_seq_len), dtype=bool)
-            for i in range(padded_dino_embeddings.shape[0]):
-                pred_mask[i, min(i, train_config.max_seq_len - 1)] = 1
-            pred_mask = torch.from_numpy(pred_mask).to(device)
+            pred_mask = np.zeros(
+                (padded_visual_embeddings.shape[0], train_config.max_seq_len),
+                dtype=bool,
+            )
+            for idx in range(padded_visual_embeddings.shape[0]):
+                pred_mask[idx, min(idx, train_config.max_seq_len - 1)] = 1
+            pred_mask_tensor = torch.from_numpy(pred_mask).to(device)
 
             with torch.no_grad():
-                stage_preds, progress_preds = reward_model(padded_dino_embeddings, curr_minlm_task_embedding)
+                stage_preds, progress_preds = reward_model(padded_visual_embeddings, language_tensor)
                 stage_preds = torch.argmax(stage_preds, dim=-1)
                 progress_preds = progress_preds.squeeze(-1)
 
-                stage_preds = stage_preds[pred_mask] # (num_steps, )
-                progress_preds = progress_preds[pred_mask] # (num_steps,)
+                stage_preds = stage_preds[pred_mask_tensor]
+                progress_preds = progress_preds[pred_mask_tensor]
 
                 prior_progress = cumulative_stage_prior[stage_preds]
                 total_progress_pred = prior_progress + progress_preds * stage_prior[stage_preds]
-            
-            # ================= Evaluate pretrained reward model ================
+
             reward_sequence = total_progress_pred.detach().cpu().numpy()
             episode_output_path = output_dir / f"{key}.mp4"
             save_episode_reward_video(
                 episode_name=str(key),
-                frames=side_cam_frames,
+                frames=episode["side_cam"][:],
                 rewards=reward_sequence,
                 output_path=episode_output_path,
-                fps=args.video_fps
+                fps=args.video_fps,
             )
+            LOGGER.info("Saved visualization for episode %s to %s", key, episode_output_path)
 
 
 if __name__ == "__main__":

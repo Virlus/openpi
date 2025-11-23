@@ -1,67 +1,60 @@
-from modelscope import Qwen3VLMoeForConditionalGeneration, AutoProcessor
+"""Minimal Qwen3-VL embedding extraction example for debugging new backbones."""
+
+from __future__ import annotations
+
+import dataclasses
+import logging
+from pathlib import Path
+from typing import List
+
+import numpy as np
 import torch
-from qwen_vl_utils import process_vision_info
+import tyro
+from PIL import Image
 
-# # default: Load the model on the available device(s)
-# model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-#     "Qwen/Qwen3-VL-235B-A22B-Instruct", dtype="auto", device_map="auto"
-# )
+from reward_model.config import get_reward_backbone_config
+from reward_model.embedding_extractors import ExtractorInitParams, build_embedding_extractor
 
-# We recommend enabling flash_attention_2 for better acceleration and memory saving, especially in multi-image and video scenarios.
-model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-    "Qwen/Qwen3-VL-235B-A22B-Instruct",
-    dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
-    device_map="auto",
-)
+LOGGER = logging.getLogger(__name__)
 
-processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-235B-A22B-Instruct")
 
-# For batched inference
-processor.tokenizer.padding_side = 'left'
+@dataclasses.dataclass
+class Args:
+    image_dir: str
+    prompt: str = "Put the items in the pot."
+    batch_size: int = 32
 
-# Batched messages
-messages = []
 
-for i in range(10):
-    message = [{
-        "role": "user",
-        "content": [
-            {"type": "image", "image": f"/data/yuwenye/reward_modeling/data/qwen/1113_kitchen/episode_0/{i}.png"},
-            {"type": "text", "text": "Put the items in the pot."},
-        ],
-    }]
-    messages.append(message)
+def _load_frames(image_dir: Path) -> np.ndarray:
+    frames: List[np.ndarray] = []
+    for image_path in sorted(image_dir.glob("*.png")):
+        image = Image.open(image_path).convert("RGB")
+        frames.append(np.asarray(image))
+    if not frames:
+        raise ValueError(f"No PNG images found under {image_dir}.")
+    return np.stack(frames, axis=0)
 
-# Process input
-text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, padding=True)
-image_inputs, video_inputs = process_vision_info(messages)
-inputs = processor(
-    text=text,
-    images=image_inputs,
-    videos=video_inputs,
-    padding=True,
-    do_resize=False,
-    return_tensors="pt",
-)
-inputs = inputs.to("cuda")
 
-# Run model and get hidden states
-with torch.no_grad():
-    outputs = model(
-        **inputs,
-        output_hidden_states=True,
-        return_dict=True
+def main(args: Args) -> None:
+    logging.basicConfig(level=logging.INFO)
+    image_dir = Path(args.image_dir)
+    frames = _load_frames(image_dir)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    backbone = get_reward_backbone_config("qwen3_vl")
+    extractor = build_embedding_extractor(
+        backbone,
+        ExtractorInitParams(device=device),
     )
 
-# 4. Get the last layer's Hidden States
-# shape: (batch_size, sequence_length, hidden_size)
-last_hidden_state = outputs.hidden_states[-1]
+    embeddings = extractor.extract_visual_embeddings(frames, args.batch_size, args.prompt)
+    LOGGER.info(
+        "Extracted embeddings with shape %s from %d frames located at %s",
+        embeddings.shape,
+        frames.shape[0],
+        image_dir,
+    )
 
-# 5. Separate image features
-# Since the input contains text and image tokens, you need to find the position of image tokens based on input_ids
-# Qwen3-VL images are usually wrapped by special tokens or directly replaced with visual tokens
-# A simple approach is to see which positions in input_ids are image placeholders (depends on tokenizer implementation)
 
-import pdb; pdb.set_trace()
-# print(f"Last Hidden State Shape: {last_hidden_state.shape}")
+if __name__ == "__main__":
+    main(tyro.cli(Args))
