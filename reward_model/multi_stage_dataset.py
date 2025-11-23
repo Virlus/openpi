@@ -96,7 +96,7 @@ class MultiStageDataset(dataset.Dataset):
         visual_embeddings = self.padding_sequence(visual_embeddings)
         language_embedding = self._read_language_embedding(episode_dict)
         # Progress is defined to start from the start index of the sample, following ReWIND's convention
-        sampled_progress = np.arange(end_index - start_index) / (num_frames - start_index)
+        sampled_progress = np.arange(end_index - start_index, dtype=np.float32) / (num_frames - start_index)
         progress = self.padding_sequence(sampled_progress)
         # Extracted from human / VLM annotations of high-level task stages
         stage = self.padding_sequence(episode_dict["stage"][start_index:end_index])
@@ -128,7 +128,7 @@ class MultiStageDataset(dataset.Dataset):
         visual_embeddings = np.concatenate((seq_forward, seq_backward), axis=0)
         visual_embeddings = self.padding_sequence(visual_embeddings)
         language_embedding = self._read_language_embedding(episode_dict)
-        sampled_progress = np.arange(end_index - start_index) / (num_frames - start_index)
+        sampled_progress = np.arange(end_index - start_index, dtype=np.float32) / (num_frames - start_index)
         progress = np.concatenate(
             (sampled_progress, sampled_progress[-2 : split_index - start_index : -1]), axis=0
         )
@@ -199,3 +199,14 @@ class MultiStageDataset(dataset.Dataset):
             if np.random.random() < 0.8:
                 return dict_apply(self.sample_rewinded_video_from_episode(output_dict), torch.from_numpy)
         return dict_apply(self.sample_from_episode(output_dict), torch.from_numpy)
+
+
+if __name__ == "__main__":
+    dataset = MultiStageDataset(
+        dataset_path="/data/yuwenye/reward_modeling/data/sarm/1122_kitchen_test_qwen3vl_embeddings.hdf5",
+        num_stages=7,
+        max_seq_len=32,
+        video_rewind=True,
+        visual_embedding_key="qwen3_vl_embeddings",
+    )
+    import pdb; pdb.set_trace()

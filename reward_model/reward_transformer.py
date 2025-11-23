@@ -23,6 +23,9 @@ class RewardTransformer(nn.Module):
         self.hidden_dim = hidden_dim
         self.args = args
 
+        # Multi-stage classification or continuous progress estimation
+        self.discrete = args.discrete
+
         # Project video and text to common dimension
         self.video_proj = nn.Linear(video_dim, hidden_dim)
         self.text_proj = nn.Linear(text_dim, hidden_dim) if text_dim is not None else None
@@ -39,25 +42,35 @@ class RewardTransformer(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # Shared progress prediction head (applied to each frame)
-        self.shared_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.LayerNorm(hidden_dim // 2),
-            nn.GELU(),
-            nn.Dropout(0.1),
-        )
+        if self.discrete:
+            # Shared progress prediction head (applied to each frame)
+            self.shared_head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.LayerNorm(hidden_dim // 2),
+                nn.GELU(),
+                nn.Dropout(0.1),
+            )
 
-        # Stage classification head (applied to each frame)
-        self.stage_head = nn.Sequential(
-            nn.Linear(hidden_dim // 2, num_stages),
-            nn.Softmax(dim=-1),
-        )
+            # Stage classification head (applied to each frame)
+            self.stage_head = nn.Sequential(
+                nn.Linear(hidden_dim // 2, num_stages),
+                nn.Softmax(dim=-1),
+            )
 
-        # Progress estimation head (applied to each frame)
-        self.progress_head = nn.Sequential(
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid(),
-        )
+            # Progress estimation head (applied to each frame)
+            self.progress_head = nn.Sequential(
+                nn.Linear(hidden_dim // 2, 1),
+                nn.Sigmoid(),
+            )
+        else:
+            self.progress_head = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.LayerNorm(hidden_dim // 2),
+                nn.GELU(),
+                nn.Dropout(0.1),
+                nn.Linear(hidden_dim // 2, 1),
+                nn.Sigmoid()
+            )
 
         max_tokens = args.max_seq_len + (1 if self.text_proj is not None else 0)
         base_mask = torch.triu(torch.ones(max_tokens, max_tokens) * float("-inf"), diagonal=1)
@@ -90,9 +103,11 @@ class RewardTransformer(nn.Module):
 
         video_token_count = video_embed.shape[1]
         video_tokens = transformed[:, -video_token_count:, :]
-        stage_embedding = self.shared_head(video_tokens)
-
-        stage_preds = self.stage_head(stage_embedding)
-        progress_preds = self.progress_head(stage_embedding)
-
-        return stage_preds, progress_preds
+        if self.discrete:
+            stage_embedding = self.shared_head(video_tokens)
+            stage_preds = self.stage_head(stage_embedding)
+            progress_preds = self.progress_head(stage_embedding)
+            return stage_preds, progress_preds
+        else:
+            progress_preds = self.progress_head(video_tokens)
+            return None, progress_preds

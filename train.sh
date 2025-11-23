@@ -23,5 +23,5 @@ uv run reward_model/train_reward.py \
 --eval_every 10 \
 --save_every 20 \
 --wandb_project reward_model \
---exp_name qwen3vl_sarm
+--exp_name qwen3vl_rewind
 # --language-embedding-key minlm_task_embedding \

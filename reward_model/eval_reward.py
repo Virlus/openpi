@@ -135,14 +135,18 @@ def main(args: Args) -> None:
 
             with torch.no_grad():
                 stage_preds, progress_preds = reward_model(padded_visual_embeddings, language_tensor)
-                stage_preds = torch.argmax(stage_preds, dim=-1)
-                progress_preds = progress_preds.squeeze(-1)
+                if stage_preds is not None:
+                    stage_preds = torch.argmax(stage_preds, dim=-1)
+                    progress_preds = progress_preds.squeeze(-1)
 
-                stage_preds = stage_preds[pred_mask_tensor]
-                progress_preds = progress_preds[pred_mask_tensor]
+                    stage_preds = stage_preds[pred_mask_tensor]
+                    progress_preds = progress_preds[pred_mask_tensor]
 
-                prior_progress = cumulative_stage_prior[stage_preds]
-                total_progress_pred = prior_progress + progress_preds * stage_prior[stage_preds]
+                    prior_progress = cumulative_stage_prior[stage_preds]
+                    total_progress_pred = prior_progress + progress_preds * stage_prior[stage_preds]
+                else:
+                    progress_preds = progress_preds.squeeze(-1)
+                    total_progress_pred = progress_preds[pred_mask_tensor]
 
             reward_sequence = total_progress_pred.detach().cpu().numpy()
             episode_output_path = output_dir / f"{key}.mp4"

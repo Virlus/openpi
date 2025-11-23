@@ -43,6 +43,7 @@ class Args:
     eval_every: int = 10
     save_every: int = 20
     # model parameters
+    discrete: bool = False
     video_dim: Optional[int] = None
     text_dim: Optional[int] = None
     hidden_dim: int = 512
@@ -141,26 +142,40 @@ def main(args: Args) -> None:
             optimizer.zero_grad()
             batch = dict_apply(batch, lambda x: x.to(device))
             language_inputs = batch.get("language_embeddings")
-            stage_preds, progress_preds = model(batch["visual_embeddings"], language_inputs)
-            progress_loss = mse_loss(progress_preds.squeeze(-1), batch["subtask_progress"])
-            stage_loss = cross_entropy(
-                stage_preds.reshape(-1, args.num_stages),
-                batch["stage"].reshape(-1),
-            )
-            loss = progress_loss + stage_loss
+
+            if args.discrete:
+                stage_preds, progress_preds = model(batch["visual_embeddings"], language_inputs)
+                progress_loss = mse_loss(progress_preds.squeeze(-1), batch["subtask_progress"])
+                stage_loss = cross_entropy(
+                    stage_preds.reshape(-1, args.num_stages),
+                    batch["stage"].reshape(-1),
+                )
+                loss = progress_loss + stage_loss
+            else:
+                _, progress_preds = model(batch["visual_embeddings"], language_inputs)
+                loss = mse_loss(progress_preds.squeeze(-1), batch["progress"])
+            
             loss.backward()
             if args.clip_grad:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             scheduler.step()
-            wandb.log(
-                {
-                    "train/progress_loss": progress_loss.item(),
-                    "train/stage_loss": stage_loss.item(),
-                    "train/loss": loss.item(),
-                    "train/lr": scheduler.get_last_lr()[0],
-                }
-            )
+            if args.discrete:
+                wandb.log(
+                    {
+                        "train/progress_loss": progress_loss.item(),
+                        "train/stage_loss": stage_loss.item(),
+                        "train/loss": loss.item(),
+                        "train/lr": scheduler.get_last_lr()[0],
+                    }
+                )
+            else:
+                wandb.log(
+                    {
+                        "train/loss": loss.item(),
+                        "train/lr": scheduler.get_last_lr()[0],
+                    }
+                )
 
         LOGGER.info("Epoch %d completed; Train loss: %.4f", epoch + 1, loss.item())
 
@@ -173,23 +188,36 @@ def main(args: Args) -> None:
                 for batch in tqdm(val_loader, desc=f"Epoch {epoch + 1} Validation"):
                     batch = dict_apply(batch, lambda x: x.to(device))
                     language_inputs = batch.get("language_embeddings")
-                    stage_preds, progress_preds = model(batch["visual_embeddings"], language_inputs)
-                    progress_loss = mse_loss(progress_preds.squeeze(-1), batch["subtask_progress"])
-                    stage_loss = cross_entropy(
-                        stage_preds.reshape(-1, args.num_stages),
-                        batch["stage"].reshape(-1),
-                    )
-                    curr_val_loss = progress_loss + stage_loss
-                    val_loss += curr_val_loss.item()
-                    val_progress_loss += progress_loss.item()
-                    val_stage_loss += stage_loss.item()
-            wandb.log(
-                {
-                    "val/progress_loss": val_progress_loss / len(val_loader),
-                    "val/stage_loss": val_stage_loss / len(val_loader),
-                    "val/loss": val_loss / len(val_loader),
-                }
-            )
+                    if args.discrete:
+                        stage_preds, progress_preds = model(batch["visual_embeddings"], language_inputs)
+                        progress_loss = mse_loss(progress_preds.squeeze(-1), batch["subtask_progress"])
+                        stage_loss = cross_entropy(
+                            stage_preds.reshape(-1, args.num_stages),
+                            batch["stage"].reshape(-1),
+                        )
+                        curr_val_loss = progress_loss + stage_loss
+                        val_loss += curr_val_loss.item()
+                        val_progress_loss += progress_loss.item()
+                        val_stage_loss += stage_loss.item()
+                    else:
+                        _, progress_preds = model(batch["visual_embeddings"], language_inputs)
+                        progress_loss = mse_loss(progress_preds.squeeze(-1), batch["progress"])
+                        val_loss += progress_loss.item()
+
+            if args.discrete:
+                wandb.log(
+                    {
+                        "val/progress_loss": val_progress_loss / len(val_loader),
+                        "val/stage_loss": val_stage_loss / len(val_loader),
+                        "val/loss": val_loss / len(val_loader),
+                    }
+                )
+            else:
+                wandb.log(
+                    {
+                        "val/loss": val_loss / len(val_loader),
+                    }
+                )
             LOGGER.info(
                 "Epoch %d completed; Validation loss: %.4f",
                 epoch + 1,
