@@ -43,7 +43,6 @@ def _resolve_device(device_str: str) -> torch.device:
 def _build_sliding_windows(
     dataset: MultiStageDataset,
     embeddings: np.ndarray,
-    max_seq_len: int,
 ) -> np.ndarray:
     padded_sequences = [
         dataset.padding_sequence(embeddings[:-i]) for i in range(embeddings.shape[0] - 1, 0, -1)
@@ -112,7 +111,6 @@ def main(args: Args) -> None:
             padded_visual_embeddings = _build_sliding_windows(
                 train_dataset,
                 visual_embeddings,
-                train_config.max_seq_len,
             )
             padded_visual_embeddings = torch.from_numpy(padded_visual_embeddings).to(device)
 
