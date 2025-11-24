@@ -3,6 +3,7 @@
 ## Scripts for reward modeling training
 
 First, extract embeddings using one of the registered backbones in `reward_model/config.py`.
+A minimal example is provided in `reward_model/generate_embeddings.sh`.
 
 ```
 python reward_model/generate_embeddings.py \
@@ -16,14 +17,22 @@ python reward_model/generate_embeddings.py \
 
 For end-to-end VLMs (e.g., `qwen3_vl`), change `--backbone` accordingly. A minimal Qwen3-VL extraction example lives at `third_party/qwen3/extract_vl_embeddings.py`.
 
-Then, annotate stage information on the embedding buffer.
+If you follow a ReWIND-style progress estimation, you can skip the following contents and dive into [our training pipeline](#key-components-for-the-reward-model). Otherwise, you need to annotate the stage information following SARM.
+
+Moving on, we need to turn expert demonstrations into videos with frame annotations so that we can manually annotate the timesteps where stage transition happens.
+
+```
+python reward_model/save_annotated_video.py --data_path /path/to/raw/hdf5/dataset --output_dir /path/to/annotated/videos
+```
+
+Then, we annotate stage information on the embedding buffer through a `.json` file.
 
 ```
 python reward_model/annotate_stage.py \
     --data_path /path/to/save/your/embeddings/buffer \
     --stage_annotation_path /path/to/stage/annotation/json/file \
     --num_stages ${number of stages in this task} \
-    --visual-embedding-key dino_embeddings
+    --backbone dinov2_minilm
 ```
 
 Finally, train the reward model (see `train.sh` for a concrete invocation).

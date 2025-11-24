@@ -11,4 +11,3 @@ python reward_model/generate_embeddings.py \
     --backbone qwen3_vl \
     --prompt "Put the items in the pot." \
     --batch_size 32
-    # --dino-ckpt-path /data/yuwenye/reward_modeling/dinov2_vitb14_reg4_pretrain.pth \

@@ -26,7 +26,6 @@ class Args:
     backbone: str = "dinov2_minilm"
     batch_size: int = 32
     prompt: Optional[str] = None
-    dino_ckpt_path: Optional[str] = None
     device: str = "cuda"
 
 
@@ -52,7 +51,7 @@ def main(args: Args) -> None:
 
     extractor = build_embedding_extractor(
         backbone_config,
-        ExtractorInitParams(device=device, dino_ckpt_path=args.dino_ckpt_path),
+        ExtractorInitParams(device=device),
     )
     language_embedding = extractor.get_language_embedding(prompt)
 

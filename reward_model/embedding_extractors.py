@@ -22,7 +22,6 @@ LOGGER = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ExtractorInitParams:
     device: torch.device
-    dino_ckpt_path: Optional[str] = None
 
 
 class BaseEmbeddingExtractor(abc.ABC):
@@ -51,8 +50,6 @@ class DinoMinilmExtractor(BaseEmbeddingExtractor):
 
     def __init__(self, backbone: RewardBackboneConfig, params: ExtractorInitParams):
         super().__init__(backbone, params)
-        if params.dino_ckpt_path is None:
-            raise ValueError("DINO checkpoint path must be provided for the DINO+MiniLM extractor.")
         visual_config = backbone.visual_config
         language_config = backbone.language_config
         if visual_config.kind != "dinov2" or language_config is None or language_config.kind != "minilm":
@@ -71,8 +68,9 @@ class DinoMinilmExtractor(BaseEmbeddingExtractor):
             interpolate_antialias=bool(visual_params.get("interpolate_antialias", True)),
             interpolate_offset=float(visual_params.get("interpolate_offset", 0.0)),
         ).to(self.device)
+        assert "dino_ckpt_path" in visual_params, "DINO checkpoint path must be provided for the DINO+MiniLM extractor."
         self.dino_encoder.load_state_dict(
-            torch.load(params.dino_ckpt_path, map_location=self.device),
+            torch.load(visual_params.get("dino_ckpt_path"), map_location=self.device),
             strict=True,
         )
         self.dino_encoder.eval()

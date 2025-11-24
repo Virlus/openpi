@@ -7,6 +7,7 @@ import h5py
 import numpy as np
 import tyro
 
+from reward_model.config import RewardBackboneConfig, get_reward_backbone_config
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger(__name__)
@@ -17,8 +18,7 @@ class Args:
     data_path: str
     stage_annotation_path: str
     num_stages: int
-    visual_embedding_key: str = "dino_embeddings"
-
+    backbone: str = "dinov2_minilm"
 
 def _load_stage_annotations(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as json_file:
@@ -69,6 +69,7 @@ def _write_dataset(group: h5py.Group, name: str, data: np.ndarray) -> None:
 
 def main(args: Args) -> None:
     stage_annotations = _load_stage_annotations(args.stage_annotation_path)
+    backbone_config = get_reward_backbone_config(args.backbone)
 
     with h5py.File(args.data_path, "r+") as dataset:
         updated = 0
@@ -80,12 +81,12 @@ def main(args: Args) -> None:
                 continue
 
             episode = dataset[key]
-            if args.visual_embedding_key not in episode:
+            if backbone_config.visual_embedding.key not in episode:
                 LOGGER.error(
-                    "Embedding key '%s' not found in episode %s.", args.visual_embedding_key, key
+                    "Embedding key '%s' not found in episode %s.", backbone_config.visual_embedding.key, key
                 )
                 continue
-            num_steps = int(episode[args.visual_embedding_key].shape[0])
+            num_steps = int(episode[backbone_config.visual_embedding.key].shape[0])
             raw_boundaries = stage_annotations[key]
             assert (len(raw_boundaries) == args.num_stages - 1), "The number of stage boundaries must be the number of stages - 1"
 

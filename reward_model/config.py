@@ -41,6 +41,7 @@ DINOV2_MINILM_BACKBONE = RewardBackboneConfig(
             "num_register_tokens": 4,
             "interpolate_antialias": True,
             "interpolate_offset": 0.0,
+            "dino_ckpt_path": "/data/yuwenye/reward_modeling/dinov2_vitb14_reg4_pretrain.pth"
         },
     ),
     language_config=EncoderConfig(

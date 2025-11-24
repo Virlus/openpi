@@ -29,9 +29,6 @@ class Args:
     num_stages: int
     max_seq_len: int
     backbone: str = "dinov2_minilm"
-    visual_embedding_key: Optional[str] = None
-    language_embedding_key: Optional[str] = None
-    prompt: str = "Put the items in the pot."
     # training parameters
     batch_size: int = 256
     learning_rate: float = 1e-4
@@ -67,10 +64,8 @@ def main(args: Args) -> None:
     device = _resolve_device(args.device)
     backbone_config = get_reward_backbone_config(args.backbone)
 
-    visual_key = args.visual_embedding_key or backbone_config.visual_embedding.key
-    language_key = args.language_embedding_key
-    if language_key is None and backbone_config.language_embedding:
-        language_key = backbone_config.language_embedding.key
+    visual_key = backbone_config.visual_embedding.key
+    language_key = backbone_config.language_embedding.key if backbone_config.language_embedding else None
     args.visual_embedding_key = visual_key
     args.language_embedding_key = language_key
 

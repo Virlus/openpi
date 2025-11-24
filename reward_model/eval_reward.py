@@ -26,10 +26,10 @@ class Args:
     dataset_path: str
     output_path: str
     reward_model_path: str
-    dino_ckpt_path: Optional[str] = None
     batch_size: int = 32
     device: str = "cuda"
     video_fps: int = 10
+    prompt: str = "Put the items in the pot."
 
 
 def _resolve_device(device_str: str) -> torch.device:
@@ -93,10 +93,9 @@ def main(args: Args) -> None:
 
     extractor = build_embedding_extractor(
         backbone_config,
-        ExtractorInitParams(device=device, dino_ckpt_path=args.dino_ckpt_path),
+        ExtractorInitParams(device=device),
     )
-    prompt = getattr(train_config, "prompt")
-    language_embedding = extractor.get_language_embedding(prompt)
+    language_embedding = extractor.get_language_embedding(args.prompt)
 
     with h5py.File(args.dataset_path, "r") as dataset:
         for key in tqdm(dataset.keys(), desc="Processing episodes"):
@@ -105,7 +104,7 @@ def main(args: Args) -> None:
             visual_embeddings = extractor.extract_visual_embeddings(
                 frames=frames,
                 batch_size=args.batch_size,
-                prompt=prompt,
+                prompt=args.prompt,
             )
 
             padded_visual_embeddings = _build_sliding_windows(
