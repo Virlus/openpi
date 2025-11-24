@@ -44,7 +44,7 @@ class FlexivRobot:
             # log.warn("Fault occurred on robot server, trying to clear ...")
             print("Fault occurred on robot server, trying to clear ...")
             # Try to clear the fault
-            robot.clearFault()
+            robot.ClearFault()
             time.sleep(2)
             # Check again
             if robot.fault():
