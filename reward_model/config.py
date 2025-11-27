@@ -68,9 +68,25 @@ QWEN3_VL_BACKBONE = RewardBackboneConfig(
 )
 
 
+PI0_INTERNAL_BACKBONE = RewardBackboneConfig(
+    name="pi0_internal",
+    visual_embedding=EmbeddingFieldConfig(key="pi0_internal_embeddings", dim=None),
+    language_embedding=None,
+    visual_config=EncoderConfig(
+        kind="pi0_internal",
+        params={
+            "policy_config": "pi05_flexiv",
+            "policy_dir": "/data/yuwenye/openpi/checkpoints/pi05_flexiv/kitchen_100/39999",
+            "enable_multi_device": True,
+        },
+    ),
+)
+
+
 REWARD_BACKBONE_REGISTRY: Dict[str, RewardBackboneConfig] = {
     DINOV2_MINILM_BACKBONE.name: DINOV2_MINILM_BACKBONE,
     QWEN3_VL_BACKBONE.name: QWEN3_VL_BACKBONE,
+    PI0_INTERNAL_BACKBONE.name: PI0_INTERNAL_BACKBONE,
 }
 
 

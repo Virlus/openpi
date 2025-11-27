@@ -10,10 +10,19 @@ import torch
 from PIL import Image
 from transformers import AutoModel, AutoTokenizer
 
+import jax
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+
 from reward_model.config import RewardBackboneConfig
 from reward_model.util import dino_load_image, mean_pooling
 from third_party.dinov2.model import vit_base
-from qwen_vl_utils import process_vision_info
+try:
+    from qwen_vl_utils import process_vision_info
+except ImportError as exc:  # pragma: no cover - optional dependency
+    pass
+
+from openpi.policies import policy_config as _policy_config
+from openpi.training import config as _config
 
 
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +46,8 @@ class BaseEmbeddingExtractor(abc.ABC):
         frames: np.ndarray,
         batch_size: int,
         prompt: str,
+        other_frames: Optional[np.ndarray] = None,
+        proprio_state: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Convert raw frames into visual embeddings."""
 
@@ -86,6 +97,8 @@ class DinoMinilmExtractor(BaseEmbeddingExtractor):
         frames: np.ndarray,
         batch_size: int,
         prompt: str,
+        other_frames: Optional[np.ndarray] = None,
+        proprio_state: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         del prompt  # Unused but kept for API compatibility.
         embeddings: List[np.ndarray] = []
@@ -147,6 +160,8 @@ class Qwen3VLExtractor(BaseEmbeddingExtractor):
         frames: np.ndarray,
         batch_size: int,
         prompt: str,
+        other_frames: Optional[np.ndarray] = None,
+        proprio_state: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         embeddings: List[np.ndarray] = []
         total_steps = frames.shape[0]
@@ -208,6 +223,103 @@ class Qwen3VLExtractor(BaseEmbeddingExtractor):
         return messages
 
 
+class Pi0InternalExtractor(BaseEmbeddingExtractor):
+    """Intrinsic visual embeddings from pretrained Pi0 / Pi0.5 models."""
+
+    def __init__(self, backbone: RewardBackboneConfig, params: ExtractorInitParams):
+        super().__init__(backbone, params)
+
+        visual_config = backbone.visual_config
+        if visual_config.kind != "pi0_internal":
+            raise ValueError("Pi0/Pi0.5 internal configuration is missing.")
+        pi0_params = visual_config.params
+
+        self.device = params.device
+        self.policy = _policy_config.create_trained_policy(
+            _config.get_config(pi0_params.get("policy_config")),
+            pi0_params.get("policy_dir"),
+        )
+
+        self._device_count = jax.local_device_count()
+        requested_multi_device = bool(pi0_params.get("enable_multi_device", True))
+        self._multi_device_enabled = requested_multi_device and self._device_count > 1
+        self._mesh: Mesh | None = None
+        self._batch_sharding: NamedSharding | None = None
+        if self._multi_device_enabled:
+            devices = np.asarray(jax.local_devices())
+            self._mesh = Mesh(devices, ("data",))
+            self._batch_sharding = NamedSharding(self._mesh, PartitionSpec("data"))
+            LOGGER.info(
+                "Pi0 internal extractor using %d GPUs for batched embeddings.",
+                self._device_count,
+            )
+        else:
+            if requested_multi_device and self._device_count <= 1:
+                LOGGER.warning(
+                    "Multi-device mode requested but only %d GPU detected. Falling back to single GPU.",
+                    self._device_count,
+                )
+            self._multi_device_enabled = False
+            self._mesh = None
+            self._batch_sharding = None
+
+    def extract_visual_embeddings(
+        self,
+        frames: np.ndarray,
+        batch_size: int,
+        prompt: str,
+        other_frames: Optional[np.ndarray] = None,
+        proprio_state: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        assert (
+            other_frames is not None and proprio_state is not None
+        ), "Other frames and proprio state are required for Pi0 internal extractor."
+        embeddings: List[np.ndarray] = []
+        total_steps = frames.shape[0]
+        for start in range(0, total_steps, batch_size):
+            end = min(start + batch_size, total_steps)
+            batch_frames = frames[start:end]
+            batch_other_frames = other_frames[start:end]
+            batch_proprio_state = proprio_state[start:end]
+            original_batch = batch_frames.shape[0]
+            batch_inputs = {
+                "observation/image": batch_frames,
+                "observation/wrist_image": batch_other_frames,
+                "observation/state": batch_proprio_state,
+                "prompt": np.array([prompt] * original_batch),
+            }
+            if self._multi_device_enabled and self._batch_sharding is not None:
+                sharded_inputs, _ = self._prepare_multi_device_batch(batch_inputs)
+                batch_embeddings = self.policy.extract_visual_embeddings(
+                    sharded_inputs,
+                    batch_sharding=self._batch_sharding,
+                )
+                batch_embeddings = batch_embeddings[:original_batch]
+            else:
+                batch_embeddings = self.policy.extract_visual_embeddings(batch_inputs)
+            embeddings.append(batch_embeddings)
+        return np.concatenate(embeddings, axis=0)
+
+    def _prepare_multi_device_batch(self, batch_inputs: Dict[str, np.ndarray]) -> Tuple[Dict[str, np.ndarray], int]:
+        assert self._multi_device_enabled
+        batch_size = next(iter(batch_inputs.values())).shape[0]
+        remainder = batch_size % self._device_count
+        if remainder == 0:
+            return batch_inputs, 0
+        pad = self._device_count - remainder
+        padded_inputs = {key: self._pad_array(value, pad) for key, value in batch_inputs.items()}
+        return padded_inputs, pad
+
+    @staticmethod
+    def _pad_array(array: np.ndarray, pad: int) -> np.ndarray:
+        if pad == 0:
+            return array
+        if array.shape[0] == 0:
+            raise ValueError("Cannot pad an empty batch for sharding.")
+        pad_values = np.repeat(array[-1:], pad, axis=0)
+        return np.concatenate([array, pad_values], axis=0)
+
+
 def build_embedding_extractor(
     backbone: RewardBackboneConfig,
     params: ExtractorInitParams,
@@ -217,6 +329,8 @@ def build_embedding_extractor(
         return DinoMinilmExtractor(backbone, params)
     if backbone.visual_config.kind == "qwen3_vl":
         return Qwen3VLExtractor(backbone, params)
+    if backbone.visual_config.kind == "pi0_internal":
+        return Pi0InternalExtractor(backbone, params)
     raise ValueError(
         f"Unsupported backbone configuration: visual={backbone.visual_config.kind}, "
         f"language={getattr(backbone.language_config, 'kind', None)}."

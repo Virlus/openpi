@@ -277,3 +277,18 @@ class Pi0(_model.BaseModel):
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
         return x_0
+
+    @override
+    def extract_visual_embeddings(self, obs: _model.Observation, img_key: str="base_0_rgb") -> jnp.ndarray:
+        observation = _model.preprocess_observation(None, obs, train=False)
+        observation = jax.tree.map(lambda x: jax.lax.stop_gradient(x), observation)
+        # first fill KV cache with a forward pass of the prefix
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
+        positions = jnp.cumsum(prefix_mask, axis=1) - 1
+        (prefix_out, _), _ = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+        image_size = observation.images[img_key].shape[1:-1]
+        patch_size = self.PaliGemma.img.module.patch_size
+        num_patches = (image_size[0] // patch_size[0]) * (image_size[1] // patch_size[1])
+        prefix_out = prefix_out[:, :num_patches, :].mean(axis=1)
+        return prefix_out

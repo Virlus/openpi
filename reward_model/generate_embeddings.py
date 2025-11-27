@@ -61,10 +61,14 @@ def main(args: Args) -> None:
             episode = dataset[key]
             group = output_file.require_group(key)
             frames = episode["side_cam"]
+            other_frames = episode["wrist_cam"]
+            proprio_state = episode["tcp_pose"]
             visual_embeddings = extractor.extract_visual_embeddings(
                 frames=frames,
                 batch_size=args.batch_size,
                 prompt=prompt,
+                other_frames=other_frames,
+                proprio_state=proprio_state,
             )
             _write_dataset(group, backbone_config.visual_embedding.key, visual_embeddings)
 
