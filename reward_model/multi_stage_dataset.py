@@ -33,6 +33,7 @@ class MultiStageDataset(dataset.Dataset):
         video_rewind: bool,
         visual_embedding_key: str = "dino_embeddings",
         language_embedding_key: Optional[str] = "minlm_task_embedding",
+        discrete: bool = False,
     ) -> None:
         super().__init__()
         self.dataset_path = dataset_path
@@ -45,7 +46,9 @@ class MultiStageDataset(dataset.Dataset):
         self._load_dataset()
         self.visual_dim = self._infer_feature_dim(self.visual_embedding_key)
         self.language_dim = self._infer_feature_dim(self.language_embedding_key)
-        self._calc_stage_prior()
+        self.discrete = discrete
+        if discrete:
+            self._calc_stage_prior()
 
     def _load_dataset(self) -> None:
         """
@@ -98,17 +101,20 @@ class MultiStageDataset(dataset.Dataset):
         # Progress is defined to start from the start index of the sample, following ReWIND's convention
         sampled_progress = np.arange(end_index - start_index, dtype=np.float32) / (num_frames - start_index)
         progress = self.padding_sequence(sampled_progress)
-        # Extracted from human / VLM annotations of high-level task stages
-        stage = self.padding_sequence(episode_dict["stage"][start_index:end_index])
-        subtask_progress = self.padding_sequence(
-            episode_dict["subtask_progress"][start_index:end_index]
-        )
         sample = {
             "visual_embeddings": visual_embeddings,
             "progress": progress,
-            "stage": stage,
-            "subtask_progress": subtask_progress,
         }
+        if self.discrete:
+            # Extracted from human / VLM annotations of high-level task stages
+            stage = self.padding_sequence(episode_dict["stage"][start_index:end_index])
+            subtask_progress = self.padding_sequence(
+                episode_dict["subtask_progress"][start_index:end_index]
+            )
+            sample.update({
+                "stage": stage,
+                "subtask_progress": subtask_progress,
+            })
         if language_embedding is not None:
             sample["language_embeddings"] = language_embedding
         return sample
@@ -133,28 +139,31 @@ class MultiStageDataset(dataset.Dataset):
             (sampled_progress, sampled_progress[-2 : split_index - start_index : -1]), axis=0
         )
         progress = self.padding_sequence(progress)
-        stage = np.concatenate(
-            (
-                episode_dict["stage"][start_index:end_index],
-                np.asarray(episode_dict["stage"])[end_index - 2 : split_index : -1],
-            ),
-            axis=0,
-        )
-        stage = self.padding_sequence(stage)
-        subtask_progress = np.concatenate(
-            (
-                episode_dict["subtask_progress"][start_index:end_index],
-                np.asarray(episode_dict["subtask_progress"])[end_index - 2 : split_index : -1],
-            ),
-            axis=0,
-        )
-        subtask_progress = self.padding_sequence(subtask_progress)
         sample = {
             "visual_embeddings": visual_embeddings,
             "progress": progress,
-            "stage": stage,
-            "subtask_progress": subtask_progress,
         }
+        if self.discrete:
+            stage = np.concatenate(
+                (
+                    episode_dict["stage"][start_index:end_index],
+                    np.asarray(episode_dict["stage"])[end_index - 2 : split_index : -1],
+                ),
+                axis=0,
+            )
+            stage = self.padding_sequence(stage)
+            subtask_progress = np.concatenate(
+                (
+                    episode_dict["subtask_progress"][start_index:end_index],
+                    np.asarray(episode_dict["subtask_progress"])[end_index - 2 : split_index : -1],
+                ),
+                axis=0,
+            )
+            subtask_progress = self.padding_sequence(subtask_progress)
+            sample.update({
+                "stage": stage,
+                "subtask_progress": subtask_progress,
+            })
         if language_embedding is not None:
             sample["language_embeddings"] = language_embedding
         return sample
@@ -203,10 +212,10 @@ class MultiStageDataset(dataset.Dataset):
 
 if __name__ == "__main__":
     dataset = MultiStageDataset(
-        dataset_path="/data/yuwenye/reward_modeling/data/sarm/1122_kitchen_test_qwen3vl_embeddings.hdf5",
+        dataset_path="/data/yuwenye/reward_modeling/data/sarm/1127_kitchen_test_pi0_internal_embeddings.hdf5",
         num_stages=7,
         max_seq_len=32,
         video_rewind=True,
-        visual_embedding_key="qwen3_vl_embeddings",
+        visual_embedding_key="pi0_internal_embeddings",
     )
     import pdb; pdb.set_trace()

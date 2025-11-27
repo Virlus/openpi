@@ -76,6 +76,7 @@ def main(args: Args) -> None:
         video_rewind=args.video_rewind,
         visual_embedding_key=visual_key,
         language_embedding_key=language_key,
+        discrete=args.discrete,
     )
     val_dataset = MultiStageDataset(
         dataset_path=args.dataset_path,
@@ -84,6 +85,7 @@ def main(args: Args) -> None:
         video_rewind=args.video_rewind,
         visual_embedding_key=visual_key,
         language_embedding_key=language_key,
+        discrete=args.discrete,
     )
     train_loader = DataLoader(
         train_dataset,

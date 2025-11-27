@@ -70,6 +70,8 @@ def main(args: Args) -> None:
                 other_frames=other_frames,
                 proprio_state=proprio_state,
             )
+            # Prevent bfloat16 precision issue with hdf5 datasets
+            visual_embeddings = visual_embeddings.astype(np.float32)
             _write_dataset(group, backbone_config.visual_embedding.key, visual_embeddings)
 
             if language_embedding is not None and backbone_config.language_embedding is not None:
