@@ -88,8 +88,9 @@ def main(args: Args) -> None:
         visual_embedding_key=visual_key,
         language_embedding_key=language_key,
     )
-    stage_prior = torch.from_numpy(train_dataset.stage_prior).to(device)
-    cumulative_stage_prior = torch.from_numpy(train_dataset.cumulative_stage_prior).to(device)
+    if train_config.discrete:
+        stage_prior = torch.from_numpy(train_dataset.stage_prior).to(device)
+        cumulative_stage_prior = torch.from_numpy(train_dataset.cumulative_stage_prior).to(device)
 
     extractor = build_embedding_extractor(
         backbone_config,
@@ -101,11 +102,17 @@ def main(args: Args) -> None:
         for key in tqdm(dataset.keys(), desc="Processing episodes"):
             episode = dataset[key]
             frames = episode["side_cam"]
+            other_frames = episode["wrist_cam"]
+            proprio_state = episode["tcp_pose"]
             visual_embeddings = extractor.extract_visual_embeddings(
                 frames=frames,
                 batch_size=args.batch_size,
                 prompt=args.prompt,
+                other_frames=other_frames,
+                proprio_state=proprio_state,
             )
+            # Prevent bfloat16 precision issue with hdf5 datasets
+            visual_embeddings = visual_embeddings.astype(np.float32)
 
             padded_visual_embeddings = _build_sliding_windows(
                 train_dataset,
