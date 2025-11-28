@@ -293,15 +293,17 @@ class TokenizePrompt(DataTransformFn):
             state = None
 
         bsz = 1
+        prompt_ndims = 0
         if not isinstance(prompt, str):
             try:
+                prompt_ndims = len(prompt.shape)
                 prompt = prompt.item()
             except:
                 bsz = prompt.shape[0]
                 prompt = prompt[0]
 
         tokens, token_masks = self.tokenizer.tokenize(prompt, state)
-        if bsz > 1:
+        if bsz > 1 or prompt_ndims > 0:
             tokens = np.repeat(tokens[None, ...], bsz, axis=0)
             token_masks = np.repeat(token_masks[None, ...], bsz, axis=0)
         return {**data, "tokenized_prompt": tokens, "tokenized_prompt_mask": token_masks}
