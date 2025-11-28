@@ -112,7 +112,7 @@ class ModelTransformFactory(GroupFactory):
 
     def __call__(self, model_config: _model.BaseModelConfig) -> _transforms.Group:
         match model_config.model_type:
-            case _model.ModelType.PI0:
+            case _model.ModelType.PI0 | _model.ModelType.PI0_VALUE:
                 return _transforms.Group(
                     inputs=[
                         _transforms.InjectDefaultPrompt(self.default_prompt),
@@ -123,8 +123,9 @@ class ModelTransformFactory(GroupFactory):
                         _transforms.PadStatesAndActions(model_config.action_dim),
                     ],
                 )
-            case _model.ModelType.PI05:
-                assert isinstance(model_config, pi0_config.Pi0Config)
+            case _model.ModelType.PI05 | _model.ModelType.PI05_VALUE:
+                assert isinstance(model_config, pi0_config.Pi0Config) or \
+                    isinstance(model_config, pi0_config.Pi0ValueConfig)
                 return _transforms.Group(
                     inputs=[
                         _transforms.InjectDefaultPrompt(self.default_prompt),
@@ -753,7 +754,7 @@ _CONFIGS = [
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotMyDataConfig(
-            repo_id="Virlus/kitchen_100",
+            repo_id="Virlus/fold_towel_64",
             base_config=DataConfig(
                 # This flag determines whether we load the prompt (i.e. the task instruction) from the
                 # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
@@ -864,7 +865,9 @@ _CONFIGS = [
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=30_000,
     ),
+    ##########################################################
     # Fine-tuning on my own configs.
+    ##########################################################
     TrainConfig(
         name="pi05_flexiv",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
@@ -883,6 +886,30 @@ _CONFIGS = [
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=40_000,
+    ),
+    ##########################################################
+    # Post-training with self-generated value estimation
+    ##########################################################
+    TrainConfig(
+        name="pi05_flexiv_value",
+        model=pi0_config.Pi0ValueConfig(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotMyDataConfig(
+            repo_id="Virlus/kitchen_100",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        batch_size=8,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.Pi05ValueWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=40_000,
     ),

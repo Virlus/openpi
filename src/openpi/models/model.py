@@ -33,7 +33,8 @@ class ModelType(enum.Enum):
     PI0 = "pi0"
     PI0_FAST = "pi0_fast"
     PI05 = "pi05"
-
+    PI0_VALUE = "pi0_value"
+    PI05_VALUE = "pi05_value"
 
 # The model always expects these images
 IMAGE_KEYS = (
