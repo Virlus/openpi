@@ -127,6 +127,64 @@ class EnsureValueDim(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class DiscretizeValues(DataTransformFn):
+    """Discretize the values into n_bins discrete bins using bilinear interpolations."""
+    n_bins: int = 256
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "value" not in data:
+            return data
+        value = np.asarray(data["value"], dtype=np.float32)
+        if value.ndim == 0:
+            raise ValueError("Value must be a 1D array")
+        elif value.ndim == 1:
+            batch_shape = ()
+        else:
+            batch_shape = value.shape[:-1]
+
+        flat_values = value.reshape(-1)
+        bins = np.linspace(-1.0, 0.0, self.n_bins, dtype=np.float32)
+        distributions = np.zeros((flat_values.size, self.n_bins), dtype=np.float32)
+
+        lower_mask = flat_values <= bins[0]
+        upper_mask = flat_values >= bins[-1]
+        distributions[lower_mask, 0] = 1.0
+        distributions[upper_mask, -1] = 1.0
+
+        mid_mask = ~(lower_mask | upper_mask)
+        if np.any(mid_mask):
+            mid_values = flat_values[mid_mask]
+            right_idx = np.searchsorted(bins, mid_values, side="right")
+            left_idx = right_idx - 1
+            left_bin = bins[left_idx]
+            right_bin = bins[right_idx]
+            denom = right_bin - left_bin
+            right_weight = (mid_values - left_bin) / denom
+            left_weight = 1.0 - right_weight
+            target_rows = np.nonzero(mid_mask)[0]
+            distributions[target_rows, left_idx] = left_weight
+            distributions[target_rows, right_idx] = right_weight
+
+        data["value"] = distributions.reshape(*batch_shape, self.n_bins)
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
+class SerializeValues(DataTransformFn):
+    """Serialize discrete value predictions into a single scalar value."""
+    n_bins: int = 256
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "value" not in data:
+            return data
+        value = np.asarray(data["value"], dtype=np.float32)
+        bins = np.linspace(-1.0, 0.0, self.n_bins, dtype=np.float32)
+        serialized_value = np.sum(value * bins, axis=-1, keepdims=True)
+        data["value"] = serialized_value
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class InjectDefaultPrompt(DataTransformFn):
     prompt: str | None
 

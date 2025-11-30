@@ -126,6 +126,9 @@ class Pi0ValueConfig(_model.BaseModelConfig):
     pi05: bool = False
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
+    # Value prediction config
+    n_bins: int = 256
+    discrete_value: bool = False
 
     def __post_init__(self):
         if self.max_token_len is None:
@@ -173,7 +176,8 @@ class Pi0ValueConfig(_model.BaseModelConfig):
                 tokenized_prompt_mask=jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool),
             )
         action_spec = jax.ShapeDtypeStruct([batch_size, self.action_horizon, self.action_dim], jnp.float32)
-        value_spec = jax.ShapeDtypeStruct([batch_size, 1], jnp.float32)
+        value_spec = jax.ShapeDtypeStruct([batch_size, 1], jnp.float32) if not self.discrete_value \
+            else jax.ShapeDtypeStruct([batch_size, self.n_bins], jnp.float32)
 
         return observation_spec, action_spec, value_spec
 

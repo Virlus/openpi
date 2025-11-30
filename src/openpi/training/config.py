@@ -440,6 +440,8 @@ class LeRobotMyDataValueConfig(DataConfigFactory):
     """
 
     extra_delta_transform: bool = False
+    extra_value_transform: bool = False
+    n_bins: int = 256
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -497,6 +499,12 @@ class LeRobotMyDataValueConfig(DataConfigFactory):
             data_transforms = data_transforms.push(
                 inputs=[_transforms.UnwrappedDeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        if self.extra_value_transform:
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DiscretizeValues(n_bins=self.n_bins)],
+                outputs=[_transforms.SerializeValues(n_bins=self.n_bins)],
             )
 
         # Model transforms include things like tokenizing the prompt and action targets
@@ -974,11 +982,13 @@ _CONFIGS = [
     ##########################################################
     TrainConfig(
         name="pi05_flexiv_value",
-        model=pi0_config.Pi0ValueConfig(pi05=True, action_horizon=10, discrete_state_input=False),
+        model=pi0_config.Pi0ValueConfig(pi05=True, action_horizon=10, discrete_state_input=False, discrete_value=True, n_bins=256),
         data=LeRobotMyDataValueConfig(
             repo_id="Virlus/kitchen_100_value",
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
+            extra_value_transform=True,
+            n_bins=256,
         ),
         batch_size=64,
         lr_schedule=_optimizer.CosineDecaySchedule(

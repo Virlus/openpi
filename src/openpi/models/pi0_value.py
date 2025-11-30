@@ -86,6 +86,7 @@ class Pi0Value(_model.BaseModel):
     def __init__(self, config: pi0_config.Pi0ValueConfig, rngs: nnx.Rngs):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         self.pi05 = config.pi05
+        self.discrete_value = config.discrete_value
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
         if config.value_variant != config.action_expert_variant:
@@ -123,7 +124,10 @@ class Pi0Value(_model.BaseModel):
 
         # Learnable parameters for value head input
         self.value_params = nnx.Param(jnp.zeros((1, value_config.width)))
-        self.value_out_proj = nnx.Linear(value_config.width, 1, rngs=rngs)
+        if self.discrete_value:
+            self.value_out_proj = nnx.Linear(value_config.width, config.n_bins, rngs=rngs)
+        else:
+            self.value_out_proj = nnx.Linear(value_config.width, 1, rngs=rngs)
 
         # This attribute gets automatically set by model.train() and model.eval().
         self.deterministic = True
@@ -252,8 +256,12 @@ class Pi0Value(_model.BaseModel):
         value_out, suffix_out = jnp.split(expert_out, [value_tokens.shape[1]], axis=1)
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
         value_pred = self.value_out_proj(value_out)
-        value_pred = nnx.sigmoid(value_pred)
-        value_loss = jnp.mean(jnp.square(value_pred + value[:, None, :]), axis=-1) # because the data has negative values
+        if self.discrete_value:
+            value_pred = nnx.log_softmax(value_pred, axis=-1)
+            value_loss = 0.1 * jnp.sum(-value[:, None, :] * value_pred, axis=-1)
+        else:
+            value_pred = nnx.sigmoid(value_pred)
+            value_loss = jnp.mean(jnp.square(value_pred + value[:, None, :]), axis=-1) # because the data has negative values
         action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
         return action_loss + value_loss
 
@@ -285,8 +293,12 @@ class Pi0Value(_model.BaseModel):
             [prefix_tokens, value_tokens], mask=prefix_value_attn_mask, positions=positions
         )
         value_pred = self.value_out_proj(value_pred_out)
-        value_pred = nnx.sigmoid(value_pred)
-        value_pred = -value_pred[:, -1, :] # because the data should have negative values
+        if self.discrete_value:
+            value_pred = nnx.log_softmax(value_pred, axis=-1)
+            value_pred = value_pred[:, -1, :]
+        else:
+            value_pred = nnx.sigmoid(value_pred)
+            value_pred = -value_pred[:, -1, :] # because the data should have negative values
 
         def step(carry):
             x_t, time = carry
