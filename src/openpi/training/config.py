@@ -976,7 +976,7 @@ _CONFIGS = [
         name="pi05_flexiv_value",
         model=pi0_config.Pi0ValueConfig(pi05=True, action_horizon=10, discrete_state_input=False),
         data=LeRobotMyDataValueConfig(
-            repo_id="Virlus/kitchen_100_progress",
+            repo_id="Virlus/kitchen_100_value",
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),

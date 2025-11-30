@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-REPO_NAME = "Virlus/test"
+REPO_NAME = "Virlus/kitchen_100_value"
 
 def main(data_dir: str, *, push_to_hub: bool = False):
     # Clean up any existing dataset in the output directory
@@ -57,7 +57,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
         for key in f:
             episode = f[key]
             num_steps = episode["action"].shape[0]
-            values = np.arange(-num_steps + 1, 1, dtype=np.float32)[:, None]
+            values = np.arange(-num_steps + 1, 1, dtype=np.float32)[:, None] / num_steps
             for step in range(num_steps):
                 dataset.add_frame(
                     {

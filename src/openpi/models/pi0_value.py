@@ -252,7 +252,8 @@ class Pi0Value(_model.BaseModel):
         value_out, suffix_out = jnp.split(expert_out, [value_tokens.shape[1]], axis=1)
         v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
         value_pred = self.value_out_proj(value_out)
-        value_loss = jnp.mean(jnp.square(value_pred - value[:, None, :]), axis=-1)
+        value_pred = nnx.sigmoid(value_pred)
+        value_loss = jnp.mean(jnp.square(value_pred + value[:, None, :]), axis=-1) # because the data has negative values
         action_loss = jnp.mean(jnp.square(v_t - u_t), axis=-1)
         return action_loss + value_loss
 
@@ -284,7 +285,8 @@ class Pi0Value(_model.BaseModel):
             [prefix_tokens, value_tokens], mask=prefix_value_attn_mask, positions=positions
         )
         value_pred = self.value_out_proj(value_pred_out)
-        value_pred = value_pred[:, -1, :]
+        value_pred = nnx.sigmoid(value_pred)
+        value_pred = -value_pred[:, -1, :] # because the data should have negative values
 
         def step(carry):
             x_t, time = carry
