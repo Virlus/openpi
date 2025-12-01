@@ -12,6 +12,7 @@ import os
 from hardware.robot_env import RobotEnv
 from hardware.my_device.macros import CAM_SERIAL, HUMAN, ROBOT, CANONICAL_EULER_ANGLES
 from openpi_client import websocket_client_policy as _websocket_client_policy
+from reward_model.util import save_episode_reward_video
 
 KEY_MAPPING = {
     'wrist_cam': 'wrist_img',
@@ -51,7 +52,7 @@ class Args:
     # Utils
     #################################################################################################################
     output_dir: str = "data/flexiv/rollout_data"  # Path to save rollout data
-    output_name: str = "1117_kitchen_100_rollout"
+    output_name: str = "1201_kitchen_100_value"
     seed: int = 7  # Random Seed (for reproducibility)
 
 
@@ -134,6 +135,16 @@ def main(args: Args) -> None:
                     episode_id += 1
                 logging.info(f"Rollout {i+1}/{args.num_rollouts} finished")
                 logging.info(f"Episode {episode_id} saved")
+                # Save reward video
+                if "value" in episode_buffers:
+                    save_episode_reward_video(
+                        episode_name=f"episode_{episode_id}",
+                        frames=episode_buffers['side_cam'],
+                        rewards=episode_buffers['value'],
+                        output_path=pathlib.Path(os.path.join(args.output_dir, args.output_name, f"episode_{episode_id}_reward.mp4")),
+                        fps=args.fps,
+                    )
+                    logging.info(f"Reward video saved to {os.path.join(args.output_dir, args.output_name, f'episode_{episode_id}_reward.mp4')}")
                 break
 
             if robot_env.keyboard.discard:
@@ -154,7 +165,14 @@ def main(args: Args) -> None:
                         "observation/state": np.concatenate((robot_state['tcp_pose'][:3], standard_tcp_rot), axis=0),
                         "prompt": task_description,
                     }
-                    action_chunk = client.infer(element)["actions"]
+                    model_output = client.infer(element)
+                    action_chunk = model_output["actions"]
+                    # Save predicted value to buffer
+                    if "value" in model_output:
+                        value = model_output["value"]
+                        if "value" not in episode_buffers:
+                            episode_buffers["value"] = []
+                        episode_buffers["value"].append(value)
                     assert(
                         len(action_chunk) >= args.replan_steps
                     ), f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
