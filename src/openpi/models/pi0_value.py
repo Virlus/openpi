@@ -196,17 +196,12 @@ class Pi0Value(_model.BaseModel):
             ar_mask += [True]
 
         action_tokens = self.action_in_proj(noisy_actions)
-        # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
-        time_emb = posemb_sincos(timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0)
         if self.pi05:
-            # time MLP (for adaRMS)
-            time_emb = self.time_mlp_in(time_emb)
-            time_emb = nnx.swish(time_emb)
-            time_emb = self.time_mlp_out(time_emb)
-            time_emb = nnx.swish(time_emb)
+            adarms_cond = self._compute_adarms_cond(timestep)
             action_expert_tokens = action_tokens
-            adarms_cond = time_emb
         else:
+            # embed timestep using sine-cosine positional encoding with sensitivity in the range [0, 1]
+            time_emb = posemb_sincos(timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0)
             # mix timestep + action information using an MLP (no adaRMS)
             time_tokens = einops.repeat(time_emb, "b emb -> b s emb", s=self.action_horizon)
             action_time_tokens = jnp.concatenate([action_tokens, time_tokens], axis=-1)
@@ -223,6 +218,20 @@ class Pi0Value(_model.BaseModel):
         input_mask = jnp.concatenate(input_mask, axis=1)
         ar_mask = jnp.array(ar_mask)
         return tokens, input_mask, ar_mask, adarms_cond
+
+    def _compute_adarms_cond(
+        self, timestep: at.Float[at.Array, " b"]
+    ) -> at.Float[at.Array, "b emb"] | None:
+        """Computes the adaRMS conditioning vector for the action expert when pi05 is enabled."""
+        if not self.pi05:
+            return None
+        timestep = timestep.astype(jnp.float32)
+        time_emb = posemb_sincos(timestep, self.action_in_proj.out_features, min_period=4e-3, max_period=4.0)
+        time_emb = self.time_mlp_in(time_emb)
+        time_emb = nnx.swish(time_emb)
+        time_emb = self.time_mlp_out(time_emb)
+        time_emb = nnx.swish(time_emb)
+        return time_emb
 
     @override
     def compute_loss(
@@ -282,6 +291,9 @@ class Pi0Value(_model.BaseModel):
         if noise is None:
             noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
 
+        prefix_value_time = jnp.ones((batch_size,), dtype=jnp.float32)
+        prefix_value_adarms_cond = self._compute_adarms_cond(prefix_value_time)
+
         # first fill KV cache with a forward pass of the prefix and value tokens
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         value_tokens, value_mask, value_ar_mask = self.embed_value_prefix(observation)
@@ -290,7 +302,10 @@ class Pi0Value(_model.BaseModel):
         prefix_value_attn_mask = make_attn_mask(prefix_value_mask, prefix_value_ar_mask)
         positions = jnp.cumsum(prefix_value_mask, axis=1) - 1
         (_, value_pred_out), kv_cache = self.PaliGemma.llm(
-            [prefix_tokens, value_tokens], mask=prefix_value_attn_mask, positions=positions
+            [prefix_tokens, value_tokens],
+            mask=prefix_value_attn_mask,
+            positions=positions,
+            adarms_cond=[None, prefix_value_adarms_cond],
         )
         value_pred = self.value_out_proj(value_pred_out)
         if self.discrete_value:
