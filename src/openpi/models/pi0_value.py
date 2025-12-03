@@ -535,6 +535,7 @@ class Pi0PrefixValue(_model.BaseModel):
         input_mask = jnp.concatenate([total_prefix_mask, suffix_mask], axis=1)
         ar_mask = jnp.concatenate([total_prefix_ar_mask, suffix_ar_mask], axis=0)
         attn_mask = make_attn_mask(input_mask, ar_mask)
+        # attn_mask = jnp.logical_and(attn_mask, _make_value_action_block_mask(prefix_mask, value_mask, suffix_mask))
         positions = jnp.cumsum(input_mask, axis=1) - 1
         (prefix_out, expert_out), _ = self.PaliGemma.llm(
             [total_prefix_tokens, suffix_tokens], mask=attn_mask, positions=positions, adarms_cond=[None, adarms_cond]
@@ -602,9 +603,12 @@ class Pi0PrefixValue(_model.BaseModel):
             # `prefix_attn_mask` is shape (b, suffix_len, prefix_len) indicating how the suffix tokens can attend to the
             # prefix tokens
             total_prefix_attn_mask = einops.repeat(total_prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+            # prefix_attn_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+            # value_attn_mask = einops.repeat(jnp.full_like(value_mask, False), "b p -> b s p", s=suffix_tokens.shape[1])
             # `combined_mask` is shape (b, suffix_len, prefix_len + value_len + suffix_len) indicating how the suffix tokens (which
             # generate the queries) can attend to the full prefix + suffix sequence (which generates the keys and values)
             full_attn_mask = jnp.concatenate([total_prefix_attn_mask, suffix_attn_mask], axis=-1)
+            # full_attn_mask = jnp.concatenate([prefix_attn_mask, value_attn_mask, suffix_attn_mask], axis=-1)
             assert full_attn_mask.shape == (
                 batch_size,
                 suffix_tokens.shape[1],
