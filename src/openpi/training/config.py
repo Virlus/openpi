@@ -1027,7 +1027,7 @@ _CONFIGS = [
         ),
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
-        weight_loader=weight_loaders.Pi05ValueWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.Pi05ValueExpertWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=40_000,
         freeze_filter=pi0_config.Pi0ValueExpertConfig(pi05=True, action_horizon=10, discrete_state_input=False, \

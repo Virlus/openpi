@@ -398,9 +398,6 @@ class Pi0ValueExpertConfig(_model.BaseModelConfig):
         gemma_params_filter = nnx_utils.PathRegex(".*llm.*")
         action_expert_params_filter = nnx_utils.PathRegex(".*llm.*_1.*")
         value_llm_filter = nnx_utils.PathRegex(".*ValuePaliGemma/llm.*")
-        value_img_filter = nnx_utils.PathRegex(".*ValuePaliGemma/img.*")
-
-        filters.append(value_img_filter)
 
         if "lora" in self.paligemma_variant:
             filters.append(
