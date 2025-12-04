@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-REPO_NAME = "Virlus/kitchen_100_value"
+REPO_NAME = "Virlus/fold_towel_64_value"
 
 def main(data_dir: str, *, push_to_hub: bool = False):
     # Clean up any existing dataset in the output directory
@@ -52,12 +52,17 @@ def main(data_dir: str, *, push_to_hub: bool = False):
         image_writer_threads=10,
         image_writer_processes=5,
     )
-    
+
+    # Obtain the largest duration of the dataset
+    with h5py.File(data_dir, "r") as f:
+        max_duration = max(len(f[key]["action"]) for key in f) - 1
+    print(f"Max duration: {max_duration}")
+
     with h5py.File(data_dir, "r") as f:
         for key in f:
             episode = f[key]
             num_steps = episode["action"].shape[0]
-            values = np.arange(-num_steps + 1, 1, dtype=np.float32)[:, None] / num_steps
+            values = np.arange(-num_steps + 1, 1, dtype=np.float32)[:, None] / max_duration
             for step in range(num_steps):
                 dataset.add_frame(
                     {
@@ -66,7 +71,7 @@ def main(data_dir: str, *, push_to_hub: bool = False):
                         "state": episode["tcp_pose"][step].astype(np.float32),
                         "actions": episode["action"][step].astype(np.float32),
                         "value": values[step],
-                        "task": "Put the items in the pot",
+                        "task": "Fold the towel twice",
                     }
                 )
             dataset.save_episode()

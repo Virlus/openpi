@@ -35,8 +35,10 @@ class ModelType(enum.Enum):
     PI05 = "pi05"
     PI0_SUFFIX_VALUE = "pi0_suffix_value"
     PI0_PREFIX_VALUE = "pi0_prefix_value"
+    PI0_VALUE_EXPERT = "pi0_value_expert"
     PI05_SUFFIX_VALUE = "pi05_suffix_value"
     PI05_PREFIX_VALUE = "pi05_prefix_value"
+    PI05_VALUE_EXPERT = "pi05_value_expert"
 
 # The model always expects these images
 IMAGE_KEYS = (
